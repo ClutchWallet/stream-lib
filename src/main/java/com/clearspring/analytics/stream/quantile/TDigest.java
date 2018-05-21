@@ -268,61 +268,50 @@ public class TDigest {
     }
 
     /**
+     * Get the desired quantile.
+     *
+     * NOTE: The quantile can exceed the min/max of the input data points,
+     * especially if the amount of data points or centroids is small and the quantile is close to 0 or 1.
+     * This method of quantile calculation uses linear interpolation to construct the inverse CDF,
+     * where the first centroid's probability is at (centroid's weight / weight sum) / 2.
+     *
      * @param q The quantile desired.  Can be in the range [0,1].
      * @return The minimum value x such that we think that the proportion of samples is <= x is q.
      */
     public double quantile(double q) {
         GroupTree values = summary;
-        Preconditions.checkArgument(values.size() > 1);
+        Preconditions.checkArgument(values.size() > 0);
 
         Iterator<Group> it = values.iterator();
         Group center = it.next();
-        Group leading = it.next();
         if (!it.hasNext()) {
-            // only two centroids because of size limits
-            // both a and b have to have just a single element
-            double diff = (leading.mean() - center.mean()) / 2;
-            if (q > 0.75) {
-                return leading.mean() + diff * (4 * q - 3);
-            } else {
-                return center.mean() + diff * (4 * q - 1);
-            }
-        } else {
-            q *= count;
-            double right = (leading.mean() - center.mean()) / 2;
-            // we have nothing else to go on so make left hanging width same as right to start
-            double left = right;
+            // If there is only 1 centroid, always use its value
+            return center.mean();
+        }
+        Group leading = it.next();
+        q *= count;
 
-            double t = center.count();
-            while (it.hasNext()) {
-                if (t + center.count() / 2 >= q) {
-                    // left side of center
-                    return center.mean() - left * 2 * (q - t) / center.count();
-                } else if (t + leading.count() >= q) {
-                    // right of b but left of the left-most thing beyond
-                    return center.mean() + right * 2.0 * (center.count() - (q - t)) / center.count();
-                }
-                t += center.count();
+        // First pivot happens at the second centroid
+        double nextPivot = center.count() + leading.count() / 2.0;
+        if (q <= nextPivot || !it.hasNext()) {
+            // This quantile doesn't exceed the next pivot, or there is no next pivot.
+            // In either case, the slope can be derived from the first two centroids.
+            double slope = 2.0 * (leading.mean() - center.mean()) / (double) (leading.count() + center.count());
+            return leading.mean() - (nextPivot - q) * slope;
+        }
 
-                center = leading;
-                leading = it.next();
-                left = right;
-                right = (leading.mean() - center.mean()) / 2;
-            }
-            // ran out of data ... assume final width is symmetrical
+        while (it.hasNext()) {
+            double prevPivot = nextPivot;
             center = leading;
-            left = right;
-            if (t + center.count() / 2 >= q) {
-                // left side of center
-                return center.mean() - left * 2 * (q - t) / center.count();
-            } else if (t + leading.count() >= q) {
-                // right of center but left of leading
-                return center.mean() + right * 2.0 * (center.count() - (q - t)) / center.count();
-            } else {
-                // shouldn't be possible
-                return 1;
+            leading = it.next();
+            nextPivot = prevPivot + ((center.count() + leading.count()) / 2.0);
+            if (q <= nextPivot || !it.hasNext()) {
+                double slope = 2.0 * (leading.mean() - center.mean()) / (double) (leading.count() + center.count());
+                return leading.mean() - (nextPivot - q) * slope;
             }
         }
+        // shouldn't be possible
+        return 1;
     }
 
     public int centroidCount() {

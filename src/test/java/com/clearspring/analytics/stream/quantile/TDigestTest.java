@@ -532,6 +532,150 @@ public class TDigestTest {
         }
     }
 
+    /**
+     * Test a situation with just 1 datapoint, expecting 1 centroid to be generated and quantiles to be equal to the single data point.
+     */
+    @Test
+    public void testOnePointQuantiles() {
+        TDigest digest = new TDigest(100);
+        digest.add(10);
+
+        assertEquals(1, digest.centroidCount());
+        verifyPercentilesIncremental(digest);
+
+        assertEquals(10, digest.quantile(0.5), 0.001);
+        assertEquals(10, digest.quantile(0), 0.001);
+        assertEquals(10, digest.quantile(1), 0.001);
+    }
+
+    /**
+     * Test a situation with just 2 datapoints, expecting 2 centroids to be generated and quantiles to be outside the min/max.
+     */
+    @Test
+    public void testTwoQuantiles() {
+        TDigest digest = new TDigest(100);
+        digest.add(10);
+        digest.add(20);
+
+        assertEquals(2, digest.centroidCount());
+        verifyPercentilesIncremental(digest);
+
+        assertEquals("Median is expected in the middle", 15.0, digest.quantile(0.5), 0.001);
+
+        //NOTE: The quantiles for 0.0 and 1.0 will be outside the min/max. The calculation is only based on the centroids.
+        // Especially in the case of merged or serialized TDigests, the min/max information will be lost, so this can't be applied reliably
+        assertEquals("Left side is considered half the distance between the two points to the left", 5.0, digest.quantile(0), 0.001);
+        assertEquals("Right side is considered half the distance between the two points to the right",25.0, digest.quantile(1), 0.001);
+    }
+
+    /**
+     * Test a situation with just 2 datapoints, with varying weights.
+     */
+    @Test
+    public void testTwoQuantilesVaryingWeight() {
+        TDigest digest = new TDigest(100);
+        digest.add(10, 3);
+        digest.add(20, 1);
+
+        assertEquals(2, digest.centroidCount());
+        verifyPercentilesIncremental(digest);
+
+        assertEquals(2.5, digest.quantile(0), 0.001);
+        assertEquals(12.5, digest.quantile(0.5), 0.001);
+        assertEquals(22.5, digest.quantile(1), 0.001);
+    }
+
+    /**
+     * Test quantiles with 3 data points of equal weight.
+     */
+    @Test
+    public void testQuantiles() {
+        TDigest digest = new TDigest(100);
+        digest.add(0);
+        digest.add(10);
+        digest.add(20);
+
+        assertEquals(3, digest.centroidCount());
+        verifyPercentilesIncremental(digest);
+
+        assertEquals(-5.0, digest.quantile(0), 0.001);
+        assertEquals(10.0, digest.quantile(0.5), 0.001);
+        assertEquals(25.0, digest.quantile(1), 0.001);
+    }
+
+    /**
+     * Test quantiles with 3 data points if varying weight.
+     */
+    @Test
+    public void testVaryingWeightQuantiles() {
+        TDigest digest = new TDigest(100);
+        digest.add(0, 3);
+        digest.add(10, 1);
+        digest.add(20, 1);
+
+        assertEquals(3, digest.centroidCount());
+        verifyPercentilesIncremental(digest);
+
+        assertEquals(-7.5, digest.quantile(0), 0.001);
+        assertEquals(5.0, digest.quantile(0.5), 0.001);
+        assertEquals(25.0, digest.quantile(1), 0.001);
+
+        // Altering only the last datapoint should not change the median
+        digest = new TDigest(100);
+        digest.add(0, 3);
+        digest.add(10, 1);
+        digest.add(30, 1);
+
+        assertEquals(3, digest.centroidCount());
+        verifyPercentilesIncremental(digest);
+
+        assertEquals(-7.5, digest.quantile(0), 0.001);
+        assertEquals(5.0, digest.quantile(0.5), 0.001);
+        assertEquals(40.0, digest.quantile(1), 0.001);
+    }
+
+    /**
+     * Does basic sanity testing for a particular small example that used to fail.
+     * See https://github.com/addthis/stream-lib/issues/138
+     */
+    @Test
+    public void testThreePointExample() {
+        TDigest tdigest = new TDigest(100);
+        double x0 = 0.18615591526031494;
+        double x1 = 0.4241943657398224;
+        double x2 = 0.8813006281852722;
+
+        tdigest.add(x0);
+        tdigest.add(x1);
+        tdigest.add(x2);
+
+        double p10 = tdigest.quantile(0.1);
+        double p50 = tdigest.quantile(0.5);
+        double p90 = tdigest.quantile(0.9);
+        double p95 = tdigest.quantile(0.95);
+        double p99 = tdigest.quantile(0.99);
+
+        assertTrue("ordering of quantiles", p10 <= p50);
+        assertTrue("ordering of quantiles", p50 <= p90);
+        assertTrue("ordering of quantiles", p90 <= p95);
+        assertTrue("ordering of quantiles", p95 <= p99);
+
+        assertEquals("Median should be the middle value, as all weights are equal", x1, p50, 0.001);
+    }
+
+    /**
+     * Verify that all percentiles from 0 to 100 (inclusive on both sides) are monotonically increasing (weakly increasing).
+     * @param digest
+     */
+    private void verifyPercentilesIncremental(TDigest digest) {
+        double prevPercentile = digest.quantile(0);
+        for (int i = 1; i <= 100; i++) {
+            double percentile = digest.quantile(i / 100.0);
+            assertTrue("At percentile " + i + ", prev was " + prevPercentile + ", new is: " + percentile, percentile >= prevPercentile);
+            prevPercentile = percentile;
+        }
+    }
+
     private double cdf(final double x, List<Double> data) {
         int n1 = 0;
         int n2 = 0;
