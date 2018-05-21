@@ -283,22 +283,15 @@ public class TDigest {
         Preconditions.checkArgument(values.size() > 0);
 
         Iterator<Group> it = values.iterator();
-        Group center = it.next();
+        Group leading = it.next();
         if (!it.hasNext()) {
             // If there is only 1 centroid, always use its value
-            return center.mean();
+            return leading.mean();
         }
-        Group leading = it.next();
-        q *= count;
 
-        // First pivot happens at the second centroid
-        double nextPivot = center.count() + leading.count() / 2.0;
-        if (q <= nextPivot || !it.hasNext()) {
-            // This quantile doesn't exceed the next pivot, or there is no next pivot.
-            // In either case, the slope can be derived from the first two centroids.
-            double slope = 2.0 * (leading.mean() - center.mean()) / (double) (leading.count() + center.count());
-            return leading.mean() - (nextPivot - q) * slope;
-        }
+        Group center;
+        double nextPivot = leading.count() / 2.0;
+        q *= count;
 
         while (it.hasNext()) {
             double prevPivot = nextPivot;
