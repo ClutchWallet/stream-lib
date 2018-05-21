@@ -279,32 +279,30 @@ public class TDigest {
      * @return The minimum value x such that we think that the proportion of samples is <= x is q.
      */
     public double quantile(double q) {
-        GroupTree values = summary;
-        Preconditions.checkArgument(values.size() > 0);
+        Preconditions.checkArgument(summary.size() > 0);
 
-        Iterator<Group> it = values.iterator();
+        Iterator<Group> it = summary.iterator();
         Group leading = it.next();
-        if (!it.hasNext()) {
-            // If there is only 1 centroid, always use its value
-            return leading.mean();
-        }
-
         Group center;
         double nextPivot = leading.count() / 2.0;
         q *= count;
 
         while (it.hasNext()) {
-            double prevPivot = nextPivot;
             center = leading;
             leading = it.next();
-            nextPivot = prevPivot + ((center.count() + leading.count()) / 2.0);
-            if (q <= nextPivot || !it.hasNext()) {
-                double slope = 2.0 * (leading.mean() - center.mean()) / (double) (leading.count() + center.count());
-                return leading.mean() - (nextPivot - q) * slope;
+            nextPivot += ((center.count() + leading.count()) / 2.0);
+            if (q > nextPivot && it.hasNext()) {
+                // If there is a next pivot and the quantile comes after it, continue with that pivot
+                continue;
             }
+
+            // Determine the slope between the center and leading centroid pivots, and work back from the leading pivot
+            double slope = 2.0 * (leading.mean() - center.mean()) / (double) (leading.count() + center.count());
+            return leading.mean() - (nextPivot - q) * slope;
         }
-        // shouldn't be possible
-        return 1;
+
+        // If there is only 1 centroid, always use its value
+        return leading.mean();
     }
 
     public int centroidCount() {
