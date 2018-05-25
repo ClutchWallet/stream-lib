@@ -163,6 +163,13 @@ public class TDigest {
         }
     }
 
+    public void updateClosest(Group closest, double x, int w, Iterable<? extends Double> baseData) {
+
+        summary.remove(closest);
+        closest.add(x, w, baseData);
+        summary.add(closest);
+    }
+
     public void add(TDigest other) {
         List<Group> tmp = Lists.newArrayList(other.summary);
 
@@ -464,6 +471,16 @@ public class TDigest {
 
         private List<Double> actualData = null;
 
+        /**
+         * The group to the left of this one.
+         */
+        protected Group left;
+
+        /**
+         * The group to the right of this one.
+         */
+        protected Group right;
+
         private Group(boolean record) {
             id = uniqueCount.incrementAndGet();
             if (record) {
@@ -509,6 +526,34 @@ public class TDigest {
 
         public int id() {
             return id;
+        }
+
+        /**
+         * Specify neighbours for this Group, also notifying those neighbours of this group.
+         * @param newLeft New left neighbour, or null if there isn't one
+         * @param newRight New right neighbour, or null if there isn't one
+         */
+        public void setNeighbours(Group newLeft, Group newRight) {
+            left = newLeft;
+            if(newLeft != null) {
+                newLeft.right = this;
+            }
+            right = newRight;
+            if(newRight != null) {
+                newRight.left = this;
+            }
+        }
+
+        /**
+         * Remove this group, by linking its left neighbour to its right neighbour and vice versa.
+         */
+        public void removeSelf() {
+            if(left != null) {
+                left.right = right;
+            }
+            if(right != null) {
+                right.left = left;
+            }
         }
 
         @Override

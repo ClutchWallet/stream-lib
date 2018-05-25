@@ -17,16 +17,17 @@
 
 package com.clearspring.analytics.stream.quantile;
 
+import com.clearspring.analytics.util.AbstractIterator;
+import com.clearspring.analytics.util.Preconditions;
+
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Iterator;
 
-import com.clearspring.analytics.util.AbstractIterator;
-import com.clearspring.analytics.util.Preconditions;
-
 /**
- * A tree containing TDigest.Group.  This adds to the normal NavigableSet the
- * ability to sum up the size of elements to the left of a particular group.
+ * A tree containing TDigest.Group.  This adds to the normal GroupTree the
+ * ability to iterate quickly through the nodes as if it were a linked list.
+ * In addition
  */
 public class GroupTree implements Iterable<TDigest.Group> {
 
@@ -49,7 +50,7 @@ public class GroupTree implements Iterable<TDigest.Group> {
         left = right = null;
     }
 
-    public GroupTree(GroupTree left, GroupTree right) {
+    private GroupTree(GroupTree left, GroupTree right) {
         this.left = left;
         this.right = right;
         count = left.count + right.count;
@@ -59,26 +60,33 @@ public class GroupTree implements Iterable<TDigest.Group> {
     }
 
     public void add(TDigest.Group group) {
+        add(group, null, null);
+    }
+
+    protected void add(TDigest.Group group, TDigest.Group knownLeft, TDigest.Group knownRight) {
         if (size == 0) {
             leaf = group;
             depth = 1;
             count = group.count();
             size = 1;
+            group.setNeighbours(knownLeft, knownRight);
             return;
         } else if (size == 1) {
             int order = group.compareTo(leaf);
             if (order < 0) {
                 left = new GroupTree(group);
                 right = new GroupTree(leaf);
+                group.setNeighbours(knownLeft, leaf);
             } else if (order > 0) {
                 left = new GroupTree(leaf);
                 right = new GroupTree(group);
+                group.setNeighbours(leaf, knownRight);
                 leaf = group;
             }
         } else if (group.compareTo(leaf) < 0) {
-            left.add(group);
+            left.add(group, knownLeft, leaf);
         } else {
-            right.add(group);
+            right.add(group, leaf, knownRight);
         }
         count += group.count();
         size++;
@@ -174,7 +182,7 @@ public class GroupTree implements Iterable<TDigest.Group> {
      * Iteratres through all groups in the tree.
      */
     public Iterator<TDigest.Group> iterator() {
-        return iterator(null);
+        return iterator(first());
     }
 
     /**
@@ -186,54 +194,36 @@ public class GroupTree implements Iterable<TDigest.Group> {
      */
     private Iterator<TDigest.Group> iterator(final TDigest.Group start) {
         return new AbstractIterator<TDigest.Group>() {
-            {
-                stack = new ArrayDeque<GroupTree>();
-                push(GroupTree.this, start);
-            }
-
-            Deque<GroupTree> stack;
-
-            // recurses down to the leaf that is >= start
-            // pending right hand branches on the way are put on the stack
-            private void push(GroupTree z, TDigest.Group start) {
-                while (z.left != null) {
-                    if (start == null || start.compareTo(z.leaf) < 0) {
-                        // remember we will have to process the right hand branch later
-                        stack.push(z.right);
-                        // note that there is no guarantee that z.left has any good data
-                        z = z.left;
-                    } else {
-                        // if the left hand branch doesn't contain start, then no push
-                        z = z.right;
-                    }
-                }
-                // put the leaf value on the stack if it is valid
-                if (start == null || z.leaf.compareTo(start) >= 0) {
-                    stack.push(z);
-                }
-            }
+            /**
+             * The last group that has been returned. Will be null if no group has been returned yet.
+             */
+            TDigest.Group lastValue = null;
 
             @Override
             protected TDigest.Group computeNext() {
-                GroupTree r = stack.poll();
-                while (r != null && r.left != null) {
-                    // unpack r onto the stack
-                    push(r, start);
-                    r = stack.poll();
+                if(lastValue == null) {
+                    if(start == null) {
+                        return endOfData();
+                    }
+                    lastValue = start;
+                    return start;
                 }
-
-                // at this point, r == null or r.left == null
-                // if r == null, stack is empty and we are done
-                // if r != null, then r.left != null and we have a result
-                if (r != null) {
-                    return r.leaf;
+                TDigest.Group returnedGroup = lastValue.right;
+                if(returnedGroup == null) {
+                    return endOfData();
                 }
-                return endOfData();
+                lastValue = returnedGroup;
+                return returnedGroup;
             }
         };
     }
 
+    /**
+     * Remove a single group from the tree.
+     * @param base Group to remove
+     */
     public void remove(TDigest.Group base) {
+        base.removeSelf();
         Preconditions.checkState(size > 0, "Cannot remove from empty set");
         if (size == 1) {
             Preconditions.checkArgument(base.compareTo(leaf) == 0, "Element %s not found", base);
@@ -330,10 +320,11 @@ public class GroupTree implements Iterable<TDigest.Group> {
      * @return the subset of elements equal to or greater than base.
      */
     public Iterable<TDigest.Group> tailSet(final TDigest.Group start) {
+        final TDigest.Group firstMatch = ceiling(start);
         return new Iterable<TDigest.Group>() {
             @Override
             public Iterator<TDigest.Group> iterator() {
-                return GroupTree.this.iterator(start);
+                return GroupTree.this.iterator(firstMatch);
             }
         };
     }
